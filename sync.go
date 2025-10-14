@@ -75,7 +75,7 @@ func main() {
 
 	// sync.Once 是一个并发安全的 once 操作, 可以确保某个操作只被执行一次
 	// 如果没有sync.Once, 则会打印 "once i" 随机顺序
-	// 如果没有sync.Once, go func 不带参数时, 会只打印 "i = 4", golang 1.22 开始, 会随机打印 "i = 9" 到 "i = 0"
+	// 如果没有sync.Once, go func 不带参数时, 会只打印 "i = 4", golang 1.22 开始, 会随机打印 "i = 4" 到 "i = 0"
 	// var wg sync.WaitGroup = sync.WaitGroup{}
 
 	for i := 0; i < 10; i++ {
