@@ -7,13 +7,33 @@ import (
 	"time"
 )
 
-var once sync.Once
+var (
+	once   sync.Once
+	person atomic.Value
+)
+
+type Person struct {
+	Name string
+	Age  int
+}
 
 func doOnce(s string) {
 	// once.Do(func() {
 	fmt.Println(s)
 	// })
 }
+
+// 这里对person进行整体更新, 而不是分别更新name和age
+// 如果person不是原子变量, 则需要使用锁来保护对person的更新, 避免竞态条件
+func RightUpdatePerson(name string, age int) {
+	newPerson := Person{}
+	newPerson.Name = name
+	newPerson.Age = age
+
+	// atomic.Value 实现多字段原子赋值的原理不是并发操作同一块多字段内存, 而是每次 Store 时都用新内存替换旧内存. Store 和 Load 都不涉及内存拷贝, 只涉及指针操作
+	person.Store(newPerson)
+}
+
 func main() {
 
 	// atomic
@@ -26,6 +46,7 @@ func main() {
 	s.Store("hello")
 	fmt.Println(s.Load())
 
+	s.CompareAndSwap("hello", "world")
 	// 可以使用类型断言来获取存储的值, 但是需要注意, 如果存储的值不是预期的类型, 会导致 panic
 	str := s.Load().(string)
 	fmt.Println(str)
@@ -75,10 +96,10 @@ func main() {
 
 	// sync.Once 是一个并发安全的 once 操作, 可以确保某个操作只被执行一次
 	// 如果没有sync.Once, 则会打印 "once i" 随机顺序
-	// 如果没有sync.Once, go func 不带参数时, 会只打印 "i = 4", golang 1.22 开始, 会随机打印 "i = 4" 到 "i = 0"
+	// 如果没有sync.Once, go func 不带参数时, 会只打印 "i = 4", golang 1.22 开始, 会随机打印 "i = 9" 到 "i = 0"
 	// var wg sync.WaitGroup = sync.WaitGroup{}
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 5; i++ {
 		// wg.Add(1)
 		go func() {
 			fmt.Println(i)
@@ -88,28 +109,36 @@ func main() {
 	// wg.Wait()
 	time.Sleep(100 * time.Millisecond)
 
-	type Student struct {
-		Name string
-		Age  int
+	// sync.Cond 是一个并发安全的条件变量, 可以在多个 goroutine 中等待和通知
+	c := sync.NewCond(&sync.Mutex{})
+	for i := 0; i < 5; i++ {
+		go listen(c)
 	}
-	studentList := []*Student{
-		{
-			Name: "张三",
-			Age:  13,
-		},
-		{
-			Name: "李四",
-			Age:  13,
-		},
-		{
-			Name: "王五",
-			Age:  13,
-		},
-	}
-	for idx, stu := range studentList {
-		go func() {
-			fmt.Printf("%v: %v\n", idx, stu)
-		}()
-	}
+	time.Sleep(1 * time.Second)
+	go broadcast(c)
+
 	time.Sleep(3 * time.Second)
+}
+
+var status int64
+
+func broadcast(c *sync.Cond) {
+	c.L.Lock()
+	atomic.StoreInt64(&status, 1)
+	c.Broadcast()
+	c.L.Unlock()
+}
+
+// sync.Cond的L.Lock() 必须在调用Wait()之前调用, 否则会导致死锁,
+// sync.Cond的Wait() 需要Broadcast() 或 Signal() 来唤醒等待的 goroutine
+// 因为Wait()会执行两个步骤:
+// 1. runtime_notifyListAdd() 将等待计数器加1并解锁.
+// 2. runtime_notifyListWait() 会获取当前Goroutine并加到Goroutine通知链尾部, 等待其他Groutine的唤醒并加锁
+func listen(c *sync.Cond) {
+	c.L.Lock()
+	for atomic.LoadInt64(&status) != 1 {
+		c.Wait()
+	}
+	fmt.Println("listen")
+	c.L.Unlock()
 }
