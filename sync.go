@@ -117,6 +117,9 @@ func main() {
 	time.Sleep(1 * time.Second)
 	go broadcast(c)
 
+	// sync.Pool 是一个并发安全的对象池, 可以在多个 goroutine 中安全地读写
+	syncPoolTest()
+
 	time.Sleep(3 * time.Second)
 }
 
@@ -141,4 +144,32 @@ func listen(c *sync.Cond) {
 	}
 	fmt.Println("listen")
 	c.L.Unlock()
+}
+
+var makeBytesCount int32
+
+func syncPoolTest() {
+	pool := sync.Pool{
+		New: func() any {
+			atomic.AddInt32(&makeBytesCount, 1)
+			return make([]byte, 0, 128)
+		},
+	}
+
+	wg := sync.WaitGroup{}
+	for i := 0; i < 1024; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			buf := pool.Get().([]byte)
+			str := fmt.Sprintf("协程%d的临时数据 ", id)
+			buf = append(buf, str...)
+			fmt.Printf("缓冲区内容 - %s（长度：%d）\n", buf, len(buf))
+			buf = buf[:0] // 清空缓冲区, 避免后续使用时受到之前数据的影响
+			pool.Put(buf) // 注意: 这里必须要 Put, 否则会导致内存泄漏
+		}(i)
+	}
+	wg.Wait()
+
+	fmt.Printf("create new bytes %d times\n", atomic.LoadInt32(&makeBytesCount))
 }
